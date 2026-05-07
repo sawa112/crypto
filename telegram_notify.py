@@ -8,13 +8,13 @@ import logging
 log = logging.getLogger(__name__)
 
 # ─── Настройки ───────────────────────────
-TG_TOKEN   = "ВАШ_BOT_TOKEN"   # от @BotFather
-TG_CHAT_ID = "ВАШ_CHAT_ID"     # ваш chat_id (узнать у @userinfobot)
+TG_TOKEN   = "8678125519:AAEnBwODFtYZpEMhKfd0vTHrgO4ouo5Mggc"   # от @BotFather
+TG_CHAT_ID = "1630387325"     # ваш chat_id (узнать у @userinfobot)
 
 
 def send(text: str):
     """Отправить сообщение в Telegram."""
-    if TG_TOKEN == "ВАШ_BOT_TOKEN":
+    if TG_TOKEN == "8678125519:AAEnBwODFtYZpEMhKfd0vTHrgO4ouo5Mggc":
         log.debug(f"[TG отключён] {text}")
         return
     try:
