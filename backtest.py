@@ -22,7 +22,7 @@ RISK_PCT     = 2.0
 LEVERAGE     = 10
 VOLUME_MULT  = 1.3
 INITIAL_DEP  = 1000.0   # стартовый депозит для симуляции
-CANDLES      = 500       # кол-во свечей для бэктеста
+CANDLES      = 1000       # кол-во свечей для бэктеста
 
 
 def fetch_history(session, symbol: str, limit: int = 500) -> list[dict]:
