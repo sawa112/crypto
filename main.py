@@ -60,7 +60,7 @@ def get_klines(symbol, limit=100):
 
 
 def get_balance():
-    resp = session.get_wallet_balance(accountType="CONTRACT", coin="USDT")
+    resp = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
     for c in resp["result"]["list"][0]["coin"]:
         if c["coin"] == "USDT":
             return float(c["availableToWithdraw"])
