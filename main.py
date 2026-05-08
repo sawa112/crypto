@@ -21,7 +21,7 @@ from telegram_notify import (
 # ─────────────────────────────────────────
 API_KEY    = "6yqC3BkYiTDP4duBoR"
 API_SECRET = "2SAnKk3vciLZGS42lqB16JXP2d2Q5I31iQhN"
-TESTNET    = True      # ← False только после успешного тестнета
+TESTNET    = False # ← False только после успешного тестнета
 
 LEVERAGE          = 10
 RISK_PCT          = 2.0
