@@ -6,13 +6,24 @@ backtest.py — Бэктест стратегии Фибоначчи на ист
 import time
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pybit.unified_trading import HTTP
 
 log = logging.getLogger(__name__)
 
 # ─── Настройки бэктеста ───────────────────
-SYMBOLS      = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+SYMBOLS = [
+    "BTCUSDT",  "ETHUSDT",  "SOLUSDT",  "BNBUSDT",  "XRPUSDT",
+    "DOGEUSDT", "ADAUSDT",  "AVAXUSDT", "LINKUSDT",  "DOTUSDT",
+    "MATICUSDT","LTCUSDT",  "BCHUSDT",  "UNIUSDT",  "ATOMUSDT",
+    "NEARUSDT", "APTUSDT",  "ARBUSDT",  "OPUSDT",   "SUIUSDT",
+    "SEIUSDT",  "TIAUSDT",  "INJUSDT",  "STXUSDT",  "RUNEUSDT",
+    "WLDUSDT",  "FETUSDT",  "RENDERUSDT","TONUSDT",  "JUPUSDT",
+    "WIFUSDT",  "BONKUSDT", "PENDLEUSDT","EIGENUSDT","IOSTUSDT",
+    "HBARUSDT", "ALGOUSDT", "VETUSDT",  "FILUSDT",  "SANDUSDT",
+]
+
 TIMEFRAME    = "15"
 SWING_BARS   = 50
 ENTRY_LEVELS = [0.382, 0.5, 0.618, 0.786]
@@ -22,7 +33,7 @@ RISK_PCT     = 2.0
 LEVERAGE     = 10
 VOLUME_MULT  = 1.3
 INITIAL_DEP  = 1000.0   # стартовый депозит для симуляции
-CANDLES      = 1000       # кол-во свечей для бэктеста
+CANDLES      = 1000     # кол-во свечей для бэктеста
 
 
 def fetch_history(session, symbol: str, limit: int = 500) -> list[dict]:
@@ -72,8 +83,8 @@ def candle_ok(bar, trend):
 
 def simulate(bars: list[dict]) -> dict:
     """Прогнать бэктест по барам. Возвращает статистику."""
-    deposit   = INITIAL_DEP
-    trades    = []
+    deposit = INITIAL_DEP
+    trades  = []
     wins = losses = 0
 
     for i in range(SWING_BARS + 1, len(bars) - 1):
@@ -114,15 +125,11 @@ def simulate(bars: list[dict]) -> dict:
         for j in range(i + 1, min(i + 21, len(bars))):
             future = bars[j]
             if trend == "bull":
-                if future["low"] <= stop:
-                    outcome = "loss"; break
-                if future["high"] >= tp1:
-                    outcome = "win";  break
+                if future["low"]  <= stop: outcome = "loss"; break
+                if future["high"] >= tp1:  outcome = "win";  break
             else:
-                if future["high"] >= stop:
-                    outcome = "loss"; break
-                if future["low"] <= tp1:
-                    outcome = "win";  break
+                if future["high"] >= stop: outcome = "loss"; break
+                if future["low"]  <= tp1:  outcome = "win";  break
 
         if outcome is None:
             continue
@@ -136,39 +143,51 @@ def simulate(bars: list[dict]) -> dict:
             "fib": touched_lvl, "outcome": outcome,
             "pnl_usdt": round(pnl_usdt, 2), "deposit": round(deposit, 2)
         })
-        if outcome == "win":  wins += 1
-        else:                 losses += 1
+        if outcome == "win": wins += 1
+        else:                losses += 1
 
         if deposit <= 0:
             break
 
     total = wins + losses
     return {
-        "trades":   total,
-        "wins":     wins,
-        "losses":   losses,
-        "winrate":  round(wins / total * 100, 1) if total else 0,
+        "trades":    total,
+        "wins":      wins,
+        "losses":    losses,
+        "winrate":   round(wins / total * 100, 1) if total else 0,
         "final_dep": round(deposit, 2),
-        "pnl_pct":  round((deposit - INITIAL_DEP) / INITIAL_DEP * 100, 1),
+        "pnl_pct":   round((deposit - INITIAL_DEP) / INITIAL_DEP * 100, 1),
         "trade_log": trades
     }
+
+
+def _backtest_one(session, sym):
+    """Загрузить и прогнать бэктест для одного символа. Для параллельного запуска."""
+    bars  = fetch_history(session, sym, limit=CANDLES)
+    stats = simulate(bars)
+    return sym, stats
 
 
 def run_backtest(session):
     log.info("=== БЭКТЕСТ ЗАПУЩЕН ===")
     results = {}
-    for sym in SYMBOLS:
-        log.info(f"Загружаю данные {sym}...")
-        bars = fetch_history(session, sym, limit=CANDLES)
-        stats = simulate(bars)
-        results[sym] = stats
-        log.info(
-            f"{sym} | Сделок: {stats['trades']} | "
-            f"Winrate: {stats['winrate']}% | "
-            f"PnL: {stats['pnl_pct']:+.1f}% | "
-            f"Депо: ${stats['final_dep']}"
-        )
-        time.sleep(0.3)
+
+    # Параллельный запуск — до 5 одновременных запросов к Bybit
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures = {pool.submit(_backtest_one, session, sym): sym for sym in SYMBOLS}
+        for future in as_completed(futures):
+            sym = futures[future]
+            try:
+                sym, stats = future.result()
+                results[sym] = stats
+                log.info(
+                    f"{sym} | Сделок: {stats['trades']} | "
+                    f"Winrate: {stats['winrate']}% | "
+                    f"PnL: {stats['pnl_pct']:+.1f}% | "
+                    f"Депо: ${stats['final_dep']}"
+                )
+            except Exception as e:
+                log.warning(f"{sym} | Ошибка бэктеста: {e}")
 
     with open("backtest_results.json", "w") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)

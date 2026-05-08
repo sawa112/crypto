@@ -6,6 +6,7 @@ main.py — Точка входа. Запускает бэктест, затем
 import time
 import logging
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pybit.unified_trading import HTTP
 
 from backtest import run_backtest, SYMBOLS, SWING_BARS, ENTRY_LEVELS, \
@@ -22,13 +23,14 @@ API_KEY    = "1M6MHUQfVFqUBvG54k"
 API_SECRET = "d2m2MqCDGsaNlFoCfshtKXO9G5t5VXug967F"
 TESTNET    = True      # ← False только после успешного тестнета
 
-LEVERAGE      = 10
-RISK_PCT      = 2.0
-LOOP_SLEEP    = 60     # секунд между проверками
+LEVERAGE          = 10
+RISK_PCT          = 2.0
+LOOP_SLEEP        = 30     # секунд между проверками
 MAX_CONSEC_LOSSES = 5
+MAX_WORKERS       = 8      # параллельных потоков для сканирования монет
 
-RUN_BACKTEST_FIRST = True   # True = запустить бэктест перед стартом бота
-MIN_BACKTEST_WINRATE = 0.0 # % — если ниже, бот не стартует
+RUN_BACKTEST_FIRST   = True
+MIN_BACKTEST_WINRATE = 0.0  # % — если ниже, бот не стартует
 # ─────────────────────────────────────────
 
 logging.basicConfig(
@@ -59,14 +61,13 @@ def get_klines(symbol, limit=100):
     } for b in bars]
 
 
-def get_balance () :
-resp = session.get.
-_wallet_balance(accountType="UNIFIED", coin="USDT" )
-for c in resp["result"]["list"][0]["coin"]:
-if c["coin"] == "USDT":
-val = c.get("availableToWithdraw") or c.get("walletBalance") or "0"
-return float(val) if val else 0.0
-return 0.0
+def get_balance():
+    resp = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
+    for c in resp["result"]["list"][0]["coin"]:
+        if c["coin"] == "USDT":
+            val = c.get("availableToWithdraw") or c.get("walletBalance") or "0"
+            return float(val) if val else 0.0
+    return 0.0
 
 
 def get_position(symbol):
@@ -84,14 +85,16 @@ def set_leverage(symbol):
             buyLeverage=str(LEVERAGE), sellLeverage=str(LEVERAGE)
         )
     except Exception as e:
-        log.warning(f"{symbol} | Плечо: {e}")
+        # 110043 = плечо уже выставлено, не страшно
+        if "110043" not in str(e):
+            log.warning(f"{symbol} | Плечо: {e}")
 
 
 def calc_qty(balance, entry, stop):
-    risk_usdt   = balance * (RISK_PCT / 100)
-    stop_dist   = abs(entry - stop)
-    stop_pct    = stop_dist / entry
-    qty_usdt    = risk_usdt / stop_pct
+    risk_usdt  = balance * (RISK_PCT / 100)
+    stop_dist  = abs(entry - stop)
+    stop_pct   = stop_dist / entry
+    qty_usdt   = risk_usdt / stop_pct
     return round(qty_usdt / entry, 3)
 
 
@@ -121,9 +124,9 @@ def open_trade(symbol, side, entry, stop, tp_prices, balance):
 
 class State:
     def __init__(self):
-        self.consec: dict[str, int] = {s: 0 for s in SYMBOLS}
-        self.stopped: set[str]      = set()
-        self.last_day: dict[str, str] = {}
+        self.consec:    dict[str, int] = {s: 0 for s in SYMBOLS}
+        self.stopped:   set[str]       = set()
+        self.last_day:  dict[str, str] = {}
 
     def reset_daily(self):
         today = datetime.utcnow().strftime("%Y-%m-%d")
@@ -134,59 +137,82 @@ class State:
                 self.last_day[sym] = today
 
 
+# ── Сканирование одного символа ──────────
+
+def scan_symbol(symbol, state, balance):
+    """Проверить один символ. Вызывается из пула потоков."""
+    try:
+        if symbol in state.stopped:
+            return
+
+        if get_position(symbol):
+            log.info(f"{symbol} | Позиция открыта, пропуск")
+            return
+
+        bars = get_klines(symbol, limit=SWING_BARS + 10)
+        if len(bars) < SWING_BARS:
+            return
+
+        price = bars[-1]["close"]
+        sh, sl, trend = find_swing(bars[-SWING_BARS:])
+        fibs = calc_fib(sh, sl, trend)
+
+        touched = None
+        for fib_r in ENTRY_LEVELS:
+            if check_touch(price, fibs[fib_r]):
+                touched = fib_r
+                break
+
+        if touched is None:
+            return
+        if not vol_ok(bars):
+            return
+        if not candle_ok(bars[-1], trend):
+            return
+
+        entry = price
+        stop  = fibs[touched] * (1 - STOP_BUFFER) if trend == "bull" \
+                else fibs[touched] * (1 + STOP_BUFFER)
+        tps   = [fibs[r] for r in TP_LEVELS if r in fibs and fibs[r] > 0]
+        side  = "long" if trend == "bull" else "short"
+
+        if tps:
+            open_trade(symbol, side, entry, stop, tps, balance)
+
+    except Exception as e:
+        log.error(f"{symbol} | Ошибка сканирования: {e}")
+
+
 # ── Основной цикл ────────────────────────
 
 def run_bot():
     state = State()
-    for sym in SYMBOLS:
-        set_leverage(sym)
+
+    # Выставляем плечо параллельно
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        pool.map(set_leverage, SYMBOLS)
 
     balance = get_balance()
     notify_start(SYMBOLS, balance)
-    log.info(f"Баланс: ${balance:.2f} | Монеты: {SYMBOLS}")
+    log.info(f"Баланс: ${balance:.2f} | Монеты: {len(SYMBOLS)} | Интервал: {LOOP_SLEEP}с")
 
     while True:
         try:
             state.reset_daily()
             balance = get_balance()
 
-            for symbol in SYMBOLS:
-                if symbol in state.stopped:
-                    continue
-
-                if get_position(symbol):
-                    log.info(f"{symbol} | Позиция открыта, пропуск")
-                    continue
-
-                bars = get_klines(symbol, limit=SWING_BARS + 10)
-                if len(bars) < SWING_BARS:
-                    continue
-
-                price = bars[-1]["close"]
-                sh, sl, trend = find_swing(bars[-SWING_BARS:])
-                fibs = calc_fib(sh, sl, trend)
-
-                touched = None
-                for fib_r in ENTRY_LEVELS:
-                    if check_touch(price, fibs[fib_r]):
-                        touched = fib_r
-                        break
-
-                if touched is None:
-                    continue
-                if not vol_ok(bars):
-                    continue
-                if not candle_ok(bars[-1], trend):
-                    continue
-
-                entry = price
-                stop  = fibs[touched] * (1 - STOP_BUFFER) if trend == "bull" \
-                        else fibs[touched] * (1 + STOP_BUFFER)
-                tps   = [fibs[r] for r in TP_LEVELS if r in fibs and fibs[r] > 0]
-                side  = "long" if trend == "bull" else "short"
-
-                if tps:
-                    open_trade(symbol, side, entry, stop, tps, balance)
+            # Параллельное сканирование всех монет
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+                futures = {
+                    pool.submit(scan_symbol, sym, state, balance): sym
+                    for sym in SYMBOLS if sym not in state.stopped
+                }
+                for future in as_completed(futures):
+                    sym = futures[future]
+                    try:
+                        future.result()
+                    except Exception as e:
+                        log.error(f"{sym} | Поток упал: {e}")
 
         except KeyboardInterrupt:
             send("🛑 Бот остановлен вручную")
@@ -204,7 +230,7 @@ def run_bot():
 if __name__ == "__main__":
     log.info("=" * 50)
     log.info("  FIBONACCI BOT — BYBIT FUTURES")
-    log.info(f"  Тестнет: {TESTNET} | Монеты: {SYMBOLS}")
+    log.info(f"  Тестнет: {TESTNET} | Монеты: {len(SYMBOLS)}")
     log.info("=" * 50)
 
     if RUN_BACKTEST_FIRST:
@@ -212,12 +238,11 @@ if __name__ == "__main__":
         results = run_backtest(session)
         notify_backtest(results)
 
-        # Проверка минимального winrate
         ok = all(r["winrate"] >= MIN_BACKTEST_WINRATE for r in results.values())
         if not ok:
             log.warning(
                 f"Бэктест не прошёл порог {MIN_BACKTEST_WINRATE}% winrate. "
-                f"Бот не запущен. Проверь настройки."
+                f"Бот не запущен."
             )
             send(f"⚠️ Бэктест ниже порога {MIN_BACKTEST_WINRATE}% — бот не запущен.")
         else:
