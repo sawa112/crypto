@@ -45,6 +45,26 @@ log = logging.getLogger(__name__)
 
 session = HTTP(testnet=TESTNET, api_key=API_KEY, api_secret=API_SECRET)
 
+# ── Кэш доступных символов на бирже ─────
+_available_symbols: set[str] = set()
+
+
+def load_available_symbols():
+    """Загрузить список символов, доступных на бирже (один раз при старте)."""
+    global _available_symbols
+    try:
+        resp = session.get_instruments_info(category="linear")
+        _available_symbols = {s["symbol"] for s in resp["result"]["list"]}
+        log.info(f"Доступно символов на бирже: {len(_available_symbols)}")
+
+        # Предупреждаем о символах из конфига, которых нет на бирже
+        missing = [s for s in SYMBOLS if s not in _available_symbols]
+        if missing:
+            log.warning(f"Символы недоступны на {'testnet' if TESTNET else 'mainnet'}, "
+                        f"будут пропущены: {', '.join(missing)}")
+    except Exception as e:
+        log.warning(f"Не удалось загрузить список символов: {e}")
+
 
 # ── Вспомогательные функции ──────────────
 
@@ -79,15 +99,25 @@ def get_position(symbol):
 
 
 def set_leverage(symbol):
-    try:
-        session.set_leverage(
-            category="linear", symbol=symbol,
-            buyLeverage=str(LEVERAGE), sellLeverage=str(LEVERAGE)
-        )
-    except Exception as e:
-        # 110043 = плечо уже выставлено, не страшно
-        if "110043" not in str(e):
-            log.warning(f"{symbol} | Плечо: {e}")
+    """Выставить плечо с повторными попытками и паузой между ними."""
+    # Пропускаем символы, которых нет на бирже
+    if _available_symbols and symbol not in _available_symbols:
+        return
+
+    for attempt in range(3):
+        try:
+            session.set_leverage(
+                category="linear", symbol=symbol,
+                buyLeverage=str(LEVERAGE), sellLeverage=str(LEVERAGE)
+            )
+            return  # успешно
+        except Exception as e:
+            if "110043" in str(e):
+                return  # плечо уже выставлено — ок
+            if attempt < 2:
+                time.sleep(1)  # пауза перед следующей попыткой
+            else:
+                log.warning(f"{symbol} | Плечо: {e}")
 
 
 def calc_qty(balance, entry, stop):
@@ -145,6 +175,11 @@ def scan_symbol(symbol, state, balance):
         if symbol in state.stopped:
             return
 
+        # Пропускаем символы, недоступные на бирже (напр. BONKUSDT на testnet)
+        if _available_symbols and symbol not in _available_symbols:
+            log.debug(f"{symbol} | Символ недоступен на бирже, пропуск")
+            return
+
         if get_position(symbol):
             log.info(f"{symbol} | Позиция открыта, пропуск")
             return
@@ -188,7 +223,10 @@ def scan_symbol(symbol, state, balance):
 def run_bot():
     state = State()
 
-    # Выставляем плечо параллельно
+    # Загружаем список доступных символов один раз при старте
+    load_available_symbols()
+
+    # Выставляем плечо параллельно (только для доступных символов)
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         pool.map(set_leverage, SYMBOLS)
 

@@ -1,5 +1,13 @@
 """
 telegram_notify.py — Уведомления в Telegram
+
+─── Как исправить ошибку "chat not found" ───────────────────────────────────
+1. Напиши своему боту команду /start в Telegram (если ещё не делал)
+2. Открой в браузере:
+   https://api.telegram.org/bot<TG_TOKEN>/getUpdates
+3. Найди поле "chat" → "id" в ответе — это твой актуальный chat_id
+4. Вставь его в TG_CHAT_ID ниже (только цифры, без кавычек если группа: -100xxxxxxxxxx)
+─────────────────────────────────────────────────────────────────────────────
 """
 import requests
 import logging
@@ -8,7 +16,7 @@ log = logging.getLogger(__name__)
 
 # ─── Настройки ───────────────────────────
 TG_TOKEN   = "8678125519:AAEnBwODFtYZpEMhKfd0vTHrgO4ouo5Mggc"   # от @BotFather
-TG_CHAT_ID = "1630387325"   # твой chat_id
+TG_CHAT_ID = "1630387325"   # ← ЗАМЕНИ на актуальный chat_id (см. инструкцию выше)
 
 
 def send(text: str):
