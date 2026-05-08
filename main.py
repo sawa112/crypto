@@ -45,7 +45,15 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-session = HTTP(testnet=TESTNET, api_key=API_KEY, api_secret=API_SECRET)
+if TESTNET:
+    session = HTTP(testnet=True, api_key=API_KEY, api_secret=API_SECRET)
+else:
+    session = HTTP(
+        testnet=False,
+        demo=True,
+        api_key=API_KEY,
+        api_secret=API_SECRET
+    )
 
 
 # ── Фильтрация символов под среду ────────
