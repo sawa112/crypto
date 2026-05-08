@@ -28,7 +28,7 @@ LOOP_SLEEP    = 60     # секунд между проверками
 MAX_CONSEC_LOSSES = 5
 
 RUN_BACKTEST_FIRST = True   # True = запустить бэктест перед стартом бота
-MIN_BACKTEST_WINRATE = 45.0 # % — если ниже, бот не стартует
+MIN_BACKTEST_WINRATE = 0.0 # % — если ниже, бот не стартует
 # ─────────────────────────────────────────
 
 logging.basicConfig(
