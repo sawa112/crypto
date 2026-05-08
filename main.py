@@ -19,8 +19,8 @@ from telegram_notify import (
 # ─────────────────────────────────────────
 # НАСТРОЙКИ — РЕДАКТИРУЙ ЗДЕСЬ
 # ─────────────────────────────────────────
-API_KEY    = "6yqC3BkYiTDP4duBoR"
-API_SECRET = "2SAnKk3vciLZGS42lqB16JXP2d2Q5I31iQhN"
+API_KEY    = "7KIEPDpDEDzv28Y6Wr"
+API_SECRET = "LYBBLDi04B8ejYAuc5MOx4l1OsN4PN1UQE7c"
 TESTNET    = False # ← False только после успешного тестнета
 
 LEVERAGE          = 10
