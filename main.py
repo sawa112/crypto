@@ -59,12 +59,14 @@ def get_klines(symbol, limit=100):
     } for b in bars]
 
 
-def get_balance():
-    resp = session.get_wallet_balance(accountType="UNIFIED", coin="USDT")
-    for c in resp["result"]["list"][0]["coin"]:
-        if c["coin"] == "USDT":
-            return float(c["availableToWithdraw"])
-    return 0.0
+def get_balance () :
+resp = session.get.
+_wallet_balance(accountType="UNIFIED", coin="USDT" )
+for c in resp["result"]["list"][0]["coin"]:
+if c["coin"] == "USDT":
+val = c.get("availableToWithdraw") or c.get("walletBalance") or "0"
+return float(val) if val else 0.0
+return 0.0
 
 
 def get_position(symbol):
