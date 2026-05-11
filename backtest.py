@@ -31,7 +31,7 @@ TP_LEVELS    = [1.0, 1.272, 1.618]
 STOP_BUFFER  = 0.003
 RISK_PCT     = 2.0
 LEVERAGE     = 10
-VOLUME_MULT  = 1.3
+VOLUME_MULT  = 1.0
 INITIAL_DEP  = 1000.0   # стартовый депозит для симуляции
 CANDLES      = 1000     # кол-во свечей для бэктеста
 
@@ -67,7 +67,7 @@ def calc_fib(swing_h, swing_l, trend):
     return levels
 
 
-def check_touch(price, level_price, tol=0.001):
+def check_touch(price, level_price, tol=0.003):
     return abs(price - level_price) / level_price <= tol
 
 
